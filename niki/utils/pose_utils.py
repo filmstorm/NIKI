@@ -280,6 +280,44 @@ def calc_cam_scale_trans(xyz_29, uv_29, uvd_weight, f=1000.0, img_center=None):
     return scale_trans, 1.0, 0.0
 
 
+def calc_cam_scale_trans_const_scale(xyz_29, uv_29, uvd_weight, scale, f=1000.0, img_center=None):
+
+    # the equation to be solved: 
+    # u * 256 / f * (z + f/256 * 1/scale) = x + tx
+    # v * 256 / f * (z + f/256 * 1/scale) = y + ty
+
+    weight = (uvd_weight.sum(axis=-1, keepdims=True) >= 3.0) * 1.0 # 24 x 1
+    # assert weight.sum() >= 2, 'too few valid keypoints to calculate cam para'
+
+    if weight.sum() < 2:
+        # print('bad data')
+        return np.zeros(2), 0.0, -1
+
+    num_joints = len(uv_29)
+
+    Ax = np.zeros((num_joints, 2))
+    Ax[:, 0] = -1
+
+    Ay = np.zeros((num_joints, 2))
+    Ay[:, 1] = -1
+
+    Ax = Ax * weight
+    Ay = Ay * weight
+
+    A = np.concatenate([Ax, Ay], axis=0)
+
+    bx = (xyz_29[:, 0] - 256 * uv_29[:, 0] / f * xyz_29[:, 2] - 256 * uv_29[:, 0] / (scale * f)) * weight[:, 0]
+    by = (xyz_29[:, 1] - 256 * uv_29[:, 1] / f * xyz_29[:, 2] - 256 * uv_29[:, 1] / (scale * f)) * weight[:, 0]
+    b = np.concatenate([bx, by], axis=0)
+
+    A_s = np.dot(A.T, A)
+    b_s = np.dot(A.T, b)
+
+    trans = np.linalg.solve(A_s, b_s)
+
+    return trans, 1.0, 0.0
+
+
 def back_projection(uvd, xyz, pred_camera, focal_length=5000.):
     camScale = pred_camera[:1].reshape(1, -1)
     camTrans = pred_camera[1:].reshape(1, -1)

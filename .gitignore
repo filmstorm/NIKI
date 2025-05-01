@@ -6,6 +6,20 @@ __pycache__/
 # C extensions
 *.so
 
+res_action
+res_action_nocam
+res_atlas
+res_cover
+res_heavy
+res_hit
+res_kick
+res_parkour
+res_walk
+res_sword
+data
+examples
+
+
 # Distribution / packaging
 .Python
 build/
@@ -108,3 +122,5 @@ data
 data/
 exp
 model_files/basicModel_neutral_lbs_10_207_0_v1.0.0.pkl
+
+**/.claude/settings.local.json

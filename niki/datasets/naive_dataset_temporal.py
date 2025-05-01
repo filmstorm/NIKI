@@ -92,6 +92,50 @@ class mix_temporal_dataset_wamass(data.Dataset):
             return self.amass_dataset[new_idx]
 
 
+class mix_temporal_dataset_full_wamass(data.Dataset):
+    def __init__(self, gt_paths, pred_paths, opt, train=True, usage='xyz', occlusion=True, use_pretrained_feat=True, img_feat_size=1024, load_img=False):
+        seq_len = opt.seq_len
+        self.use_pretrained_feat = use_pretrained_feat
+        self.use_flip = ('feature_flipped' in gt_paths[0])
+        self.h36m_dataset = naive_dataset_temporal(
+            gt_paths[0], pred_paths[0], 'h36m', train=train,
+            usage=usage, use_amass=True, occlusion=occlusion,
+            use_pretrained_feat=use_pretrained_feat, seq_len=seq_len,
+            load_img=load_img)
+        self.pw3d_dataset = naive_dataset_temporal(
+            gt_paths[1], pred_paths[1], 'pw3d', train=train,
+            usage=usage, use_amass=True, occlusion=occlusion,
+            use_pretrained_feat=use_pretrained_feat, seq_len=seq_len,
+            load_img=load_img)
+        self.hp3d_dataset = hp3d_dataset_temporal(
+            gt_paths[2], pred_paths[2], 'hp3d', train=train,
+            usage=usage, use_amass=True, use_pretrained_feat=use_pretrained_feat,
+            seq_len=seq_len, load_img=load_img)
+        self.amass_dataset = amass_dataset_temporal(
+            usage=usage, occlusion=occlusion, use_pretrained_feat=use_pretrained_feat, 
+            use_flip=self.use_flip, seq_len=seq_len, img_feat_size=img_feat_size)
+
+    def __len__(self):
+        data_len = len(self.h36m_dataset) // 3
+        if not self.use_pretrained_feat:
+            data_len = data_len // 4
+        return data_len
+
+    def __getitem__(self, idx):
+        p = random.random()
+        if p < 0.3:
+            new_idx = random.randint(0, len(self.h36m_dataset) - 1)
+            return self.h36m_dataset[new_idx]
+        elif p < 0.6:
+            new_idx = random.randint(0, len(self.pw3d_dataset) - 1)
+            return self.pw3d_dataset[new_idx]
+        elif p < 0.8:
+            new_idx = random.randint(0, len(self.hp3d_dataset) - 1)
+            return self.hp3d_dataset[new_idx]
+        else:
+            new_idx = random.randint(0, len(self.amass_dataset) - 1)
+            return self.amass_dataset[new_idx]
+
 class mix_temporal_dataset_full_woamass(data.Dataset):
     def __init__(self, gt_paths, pred_paths, opt, train=True, usage='xyz', occlusion=True, use_pretrained_feat=True, img_feat_size=1024, load_img=False):
         seq_len = opt.seq_len
@@ -266,7 +310,7 @@ class naive_dataset_temporal(data.Dataset):
     ]
 
     def __init__(self, gt_path, pred_path, dataset_name, train=False, usage='phi', only_read=True, return_jts2d=False,
-                 use_amass=False, occlusion=True, use_pretrained_feat=True, wrong_flip_aug=False, seq_len=16, get_gt_uv=True):
+                 use_amass=False, occlusion=True, use_pretrained_feat=True, wrong_flip_aug=False, seq_len=16, get_gt_uv=True, load_img=False):
         self.root_idx_17 = 0
         self.root_idx_smpl = 0
 
@@ -440,9 +484,22 @@ class naive_dataset_temporal(data.Dataset):
             'is_3dhp': float(0.0),
             'valid_smpl': valid_smpl.float()
         }
+        
+        # Add img_feat for NIKITS model
+        if self.use_pretrained_feat:
+            if 'features' in self.db_pred:
+                img_feat = self.get_sequence(start_index, end_index, self.db_pred['features']).reshape(self.seq_len, -1)
+                # Handle if feature size is 512 (add padding to make it 1024)
+                if img_feat.shape[-1] == 512:
+                    ones_pad = np.ones((self.seq_len, 512))
+                    img_feat = np.concatenate([img_feat, ones_pad], axis=-1)
+                target['img_feat'] = torch.from_numpy(img_feat).float()
+            else:
+                # If features not available, create zeros tensor
+                target['img_feat'] = torch.zeros(self.seq_len, 1024).float()
 
         if self.return_jts2d:
-            if self.occlusion:
+            if self.occlusion and 'amb_center_scale' in self.db_pred:
                 bbox = self.get_sequence(start_index, end_index, self.db_pred['amb_center_scale'])
                 scale = 1
             else:
@@ -603,6 +660,19 @@ class naive_dataset_temporal(data.Dataset):
             'theta_weight': torch.zeros(self.seq_len, 72).float(),
             'pred_theta': torch.from_numpy(pred_thetas).float(),
         }
+        
+        # Add img_feat for NIKITS model
+        if self.use_pretrained_feat:
+            if 'features' in self.db_pred:
+                img_feat = self.get_sequence(start_index, end_index, self.db_pred['features']).reshape(self.seq_len, -1)
+                # Handle if feature size is 512 (add padding to make it 1024)
+                if img_feat.shape[-1] == 512:
+                    ones_pad = np.ones((self.seq_len, 512))
+                    img_feat = np.concatenate([img_feat, ones_pad], axis=-1)
+                target['img_feat'] = torch.from_numpy(img_feat).float()
+            else:
+                # If features not available, create zeros tensor
+                target['img_feat'] = torch.zeros(self.seq_len, 1024).float()
 
         if self.return_jts2d:
             pred_cam_scale = self.get_sequence(start_index, end_index, self.db_pred['pred_camera']).reshape(self.seq_len, 1)
@@ -614,13 +684,16 @@ class naive_dataset_temporal(data.Dataset):
             target['pred_cam'] = torch.from_numpy(pred_cam).float()
             target['pred_cam_scale'] = torch.from_numpy(pred_cam_scale).float()
 
-            if self.occlusion:
+            if self.occlusion and 'amb_center_scale' in self.db_pred:
                 bbox = self.get_sequence(start_index, end_index, self.db_pred['amb_center_scale'])
-                syn_size = self.get_sequence(start_index, end_index, self.db_pred['amb_synth_size'])
-                target['amb_synth_size'] = torch.from_numpy(syn_size).type(torch.int32)
+                
+                if 'amb_synth_size' in self.db_pred:
+                    syn_size = self.get_sequence(start_index, end_index, self.db_pred['amb_synth_size'])
+                    target['amb_synth_size'] = torch.from_numpy(syn_size).type(torch.int32)
 
-                img_paths = self.get_sequence(start_index, end_index, self.db_pred['img_paths'], to_np=False)
-                target['img_path'] = list(img_paths)
+                if 'img_paths' in self.db_pred:
+                    img_paths = self.get_sequence(start_index, end_index, self.db_pred['img_paths'], to_np=False)
+                    target['img_path'] = list(img_paths)
                 scale = 1
             else:
                 bbox = self.get_sequence(start_index, end_index, self.db_pred['bbox']).reshape(self.seq_len, 4)

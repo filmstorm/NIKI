@@ -312,9 +312,12 @@ def train(train_loader, optimizer, criterion, model, epoch=0):
             'pred_xyz_24_struct': item['pred_xyz_24_struct'],
             'pred_beta': item['pred_betas'],
             'pred_phi': item['pred_phi'],
-            'pred_cam': item['pred_cam'],
-            'img_feat': item['img_feat']
+            'pred_cam': item['pred_cam']
         }
+        
+        # Add img_feat only if it exists and is used by the model
+        if 'img_feat' in item:
+            inp['img_feat'] = item['img_feat']
 
         batch_size = item['pred_xyz_29'].shape[0]
 
@@ -374,9 +377,12 @@ def valid(valid_dataset, valid_loader, logger, model, optimizer=None):
             'pred_xyz_24_struct': item['pred_xyz_24_struct'],
             'pred_beta': item['pred_betas'],
             'pred_phi': item['pred_phi'],
-            'pred_cam': item['pred_cam'],
-            'img_feat': item['img_feat']
+            'pred_cam': item['pred_cam']
         }
+        
+        # Add img_feat only if it exists and is used by the model
+        if 'img_feat' in item:
+            inp['img_feat'] = item['img_feat']
         for k, _ in inp.items():
             if isinstance(inp[k], torch.Tensor):
                 inp[k] = inp[k].cuda()
